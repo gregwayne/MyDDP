@@ -1,4 +1,4 @@
-function [fx,fu,fxx,fxu,fuu] = ParseDerivatives(fn,z,NX,NU)
+function [f,fx,fu,fxx,fxu,fuu] = ParseDerivatives(fn,z,NX,NU)
 
     [f,fz,fzz] = AllDerivatives(fn,z);
     

@@ -11,8 +11,8 @@ function [c,X,U,iters] = MyDDP(ForwardFn,CostFn,FinalFn,X,U,parameters)
     cG          = zeros([NU,NX,T]);
         
     mu          = parameters.mu;
-    alpha       = parameters.alpha;    
     max_iters   = parameters.max_iters;
+    min_prog    = parameters.min_prog;
     max_fails   = parameters.max_fails;
     c           = inf; 
     fails       = 0;
@@ -26,62 +26,57 @@ function [c,X,U,iters] = MyDDP(ForwardFn,CostFn,FinalFn,X,U,parameters)
         for t=1:T-1
             
             UN(:,t)     = UN(:,t) ...
-                          + alpha*oG(:,t) + cG(:,:,t)*(XN(:,t) - X(:,t));
+                          + oG(:,t) + cG(:,:,t)*(XN(:,t) - X(:,t));
             XN(:,t+1)   = ForwardFn([XN(:,t);UN(:,t)]);           
             cN          = cN + CostFn([XN(:,t);UN(:,t)]);
             
-        end
+        end        
         
         % Final Cost
-        cN              = cN + FinalFn(XN(:,T));        
+        cN              = cN + FinalFn(XN(:,T)); 
         
-        if (cN >= c)
-            % revert
-            mu          = 2*mu;            
-            alpha       = max(0.9*alpha,0.01);            
-            XN          = X;            
-            UN          = U;
-            cN          = c;
-            fails       = fails + 1;
+        if (cN < c - min_prog)
+            c       = cN;
+            X       = XN;
+            U       = UN;
+            mu      = 0.8*mu;
+            fails   = 0;
         else
-            % move on
-            mu          = 0.5*mu; % reduce regularizer
-            alpha       = min(1.1*alpha,1);
-            X           = XN;
-            U           = UN;
-            fails       = 0;
-        end                
-        
-        c               = cN;
-        
+            cN      = c;
+            XN      = X;
+            UN      = U;
+            mu      = 2*mu;
+            fails   = fails + 1;
+        end
+            
         disp(sprintf('Trajectory Cost: %f',cN));
-        mu,alpha
+        
+        if (iters > max_iters) || (fails > max_fails)        
+            break;            
+        end          
         
         % Initialize Backward Pass
-        [~,Vx,Vxx]  = AllDerivatives(FinalFn,XN(:,T));
-        % regularization
-        Vx          = Vx + mu*(XN(:,T) - X(:,T))';
-        Vxx         = Vxx + mu*eye(NX);
+        RegFinalFn  = @(xT) FinalFn(xT) + mu*sum((xT - X(:,T)).^2);
+        [V,Vx,Vxx]  = AllDerivatives(RegFinalFn,XN(:,T));
                 
         %% Backward Pass
         for t=T-1:-1:1
                         
             % Basic Derivatives
-            [fx,fu,fxx,fxu,fuu] = ParseDerivatives(ForwardFn,...
+            [f,fx,fu,fxx,fxu,fuu] = ParseDerivatives(ForwardFn,...
                                        [XN(:,t);UN(:,t)],NX,NU);
-                                           
-            [lx,lu,lxx,lxu,luu] = ParseDerivatives(CostFn,...
+                                   
+            RegCostFn = @(z) CostFn(z) + mu*sum((z(1:NX) - X(:,t)).^2);
+                                   
+            [l,lx,lu,lxx,lxu,luu] = ParseDerivatives(RegCostFn,...
                                        [XN(:,t);UN(:,t)],NX,NU);
                                    
             lxx                 = reshape(lxx,[NX,NX]);                                   
             lxu                 = reshape(lxu,[NX,NU]);                                   
             luu                 = reshape(luu,[NU,NU]);                                   
-                                   
-            % regularization           
-            lx                  = lx + mu*(XN(:,t) - X(:,t))';
-            lxx                 = lxx + mu*eye(NX);
-            
-            % Hamiltonian Derivatives
+                                               
+            % Hamiltonian Terms
+            Q                   = l + V;
             Qx                  = lx + Vx*fx;
             Qu                  = lu + Vx*fu;
             % Before contraction term
@@ -91,36 +86,23 @@ function [c,X,U,iters] = MyDDP(ForwardFn,CostFn,FinalFn,X,U,parameters)
             
             for i=1:NX
                
-                Qxx = Qxx + reshape(Vx(i)*fxx(i,:,:),[NX,NX]);
-                Qxu = Qxu + reshape(Vx(i)*fxu(i,:,:),[NX,NU]);
-                Quu = Quu + reshape(Vx(i)*fuu(i,:,:),[NU,NU]);
+                Qxx     = Qxx + reshape(Vx(i)*fxx(i,:,:),[NX,NX]);
+                Qxu     = Qxu + reshape(Vx(i)*fxu(i,:,:),[NX,NU]);
+                Quu     = Quu + reshape(Vx(i)*fuu(i,:,:),[NU,NU]);
                 
-            end
-                    
-            % Control Update
-            try
-                [E,D]               = eig(Quu);                
-                D                   = max(D,1);
-                DQuu                = E*D*E';
-            catch errorMsg,
-                DQuu                = 10*eye(NU);
-            end
+            end                    
                 
-            IQuu                = pinv(DQuu);            
+            IQuu                = pinv(Quu);            
             oG(:,t)             = -IQuu*Qu';
             cG(:,:,t)           = -IQuu*Qxu';
             
-            % Value Derivatives
+            % Value Terms
+            V                   = Q - Qu*IQuu*Qu';
             Vx                  = Qx - Qu*IQuu*Qxu';
             Vxx                 = Qxx - Qxu*IQuu*Qxu';
                         
-        end        
+        end                        
         
-        % Termination Criterion
-        if (iters > max_iters) || (fails >= max_fails)            
-            break;            
-        end        
-            
     end
     
 end
