@@ -1,4 +1,4 @@
-function [cN,XN,UN,iters] = DDP(ForwardFn,CostFn,FinalFn,X,U,parameters)
+function [cN,X,U,iters] = DDP(ForwardFn,CostFn,FinalFn,X,U,parameters)
     %% Based on Tom Erez's Ph.D. Thesis.
     %% Implemented by Greg Wayne, 2013.
 

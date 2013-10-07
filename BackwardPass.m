@@ -10,9 +10,7 @@ function [cG,oG,dVs_lin,dVs_quad] = BackwardPass(FinalFn,XN,UN,...
 
     dVs_lin     = zeros(T,1);
     dVs_quad    = zeros(T,1);
-        
-    parameters.lambda = 1e-2;
-            
+                    
     [V,Vx,Vxx]  = AllDerivatives(FinalFn,XN(:,T));
              
     %% Backward Pass
